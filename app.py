@@ -71,10 +71,6 @@ def _prune_tasks():
         del _tasks[k]
 
 
-def _is_packaging_busy():
-    return any(t["status"] == "running" for t in _tasks.values())
-
-
 def _prune_archive():
     archive_dir = get_output_dir() / "archive"
     if not archive_dir.exists():
@@ -222,12 +218,18 @@ def api_me():
 @app.route("/api/login", methods=["POST"])
 def api_login():
     data = request.get_json(silent=True) or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", ""))
     users = _load_users()
     user = users.get(username)
-    print(f"[LOGIN] user={username} found={user is not None} keys={list(user.keys()) if user else []}", flush=True)
-    if not user or not check_password_hash(user.get("password_hash", ""), password):
+    pw_hash = user.get("password_hash", "") if user else ""
+    if not pw_hash:
+        return jsonify({"error": "用户名或密码错误"}), 401
+    try:
+        pw_ok = check_password_hash(pw_hash, password)
+    except Exception:
+        pw_ok = False
+    if not user or not pw_ok:
         return jsonify({"error": "用户名或密码错误"}), 401
     session["username"] = username
     session["is_admin"] = user.get("is_admin", False)
@@ -250,7 +252,7 @@ def api_users():
         data = request.get_json(silent=True) or {}
         username = data.get("username", "").strip()
         password = data.get("password", "")
-        is_admin = data.get("is_admin", False)
+        is_admin = bool(data.get("is_admin", False))
         if not username or not password:
             return jsonify({"error": "用户名和密码不能为空"}), 400
         users = _load_users()
@@ -287,6 +289,10 @@ def api_users_delete(username):
         return jsonify({"error": "用户不存在"}), 404
     if username == session.get("username"):
         return jsonify({"error": "不能删除自己"}), 400
+    if users[username].get("is_admin"):
+        admin_count = sum(1 for u in users.values() if u.get("is_admin"))
+        if admin_count <= 1:
+            return jsonify({"error": "不能删除最后一个管理员"}), 400
     del users[username]
     _save_users(users)
     return jsonify({"ok": True, "message": f"用户 {username} 已删除"})
@@ -377,7 +383,12 @@ def api_release():
         args=(task_id, config, builder),
         daemon=True,
     )
-    thread.start()
+    try:
+        thread.start()
+    except Exception as e:
+        _packaging_lock.release()
+        del _tasks[task_id]
+        return jsonify({"error": f"启动打包线程失败: {e}"}), 500
     _prune_tasks()
 
     return jsonify({"task_id": task_id})
@@ -506,15 +517,18 @@ def _run_release(task_id, config, builder="unknown"):
             _current_proc = None
         task["finished_at"] = datetime.now(tz=_BJT).strftime("%Y-%m-%d %H:%M:%S")
         if not task.get("_cancel_requested"):
-            cfg_num = "8675" if config == "low" else "8676"
-            archive_dir = get_output_dir() / "archive"
-            zips = sorted(archive_dir.glob(f"cluster_{cfg_num}_*.zip"),
-                          key=lambda p: p.stat().st_mtime, reverse=True)
-            if zips:
-                latest = zips[0]
-                task["zip_path"] = str(latest.relative_to(repo_root))
-                latest.with_suffix(".builder").write_text(builder, encoding="utf-8")
-                _prune_archive()
+            try:
+                cfg_num = "8675" if config == "low" else "8676"
+                archive_dir = get_output_dir() / "archive"
+                zips = sorted(archive_dir.glob(f"cluster_{cfg_num}_*.zip"),
+                              key=lambda p: p.stat().st_mtime, reverse=True)
+                if zips:
+                    latest = zips[0]
+                    task["zip_path"] = str(latest.relative_to(repo_root))
+                    latest.with_suffix(".builder").write_text(builder, encoding="utf-8")
+                    _prune_archive()
+            except Exception as e:
+                task["log"].append(f"\n[WARNING] 归档清理失败: {e}\n")
         _packaging_lock.release()
 
 
@@ -709,22 +723,31 @@ def api_history():
 
 # ==================== 下载/删除 ====================
 
+def _safe_archive_path(name):
+    """安全拼接 archive 路径，防止路径穿越。返回 Path 或 None。"""
+    archive_dir = (get_output_dir() / "archive").resolve()
+    f = (archive_dir / name).resolve()
+    try:
+        f.relative_to(archive_dir)
+    except ValueError:
+        return None
+    return f
+
+
 @app.route("/api/download/<path:name>")
 @login_required
 def api_download(name):
-    archive_dir = get_output_dir() / "archive"
-    f = archive_dir / name
-    if not f.exists():
+    f = _safe_archive_path(name)
+    if not f or not f.exists():
         return jsonify({"error": "文件不存在"}), 404
-    return send_file(str(f), as_attachment=True, download_name=name)
+    return send_file(str(f), as_attachment=True, download_name=f.name)
 
 
 @app.route("/api/delete/<path:name>", methods=["DELETE"])
 @admin_required
 def api_delete(name):
-    archive_dir = get_output_dir() / "archive"
-    f = archive_dir / name
-    if not f.exists():
+    f = _safe_archive_path(name)
+    if not f or not f.exists():
         return jsonify({"error": "文件不存在"}), 404
     f.unlink()
     for ext in (".manifest.toml", ".builder"):

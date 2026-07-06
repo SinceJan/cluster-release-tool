@@ -588,7 +588,7 @@ async function cancelRelease(){
       return;
     }
     cancelBtn.style.display='none';
-    statusEl.innerHTML='<span class="status-tag status-running" style="background:var(--orange);color:#fff">已请求取消，等待当前编译完成...</span>';
+    statusEl.innerHTML='<span class="status-tag status-running" style="background:var(--amber);color:#fff">已请求取消，等待当前编译完成...</span>';
   }catch(e){
     cancelBtn.textContent='取消打包';cancelBtn.disabled=false;
     statusEl.innerHTML=`<span class="status-tag status-failed">取消失败: ${e.message}</span>`;
@@ -611,7 +611,7 @@ function pollReleaseStatus(taskId){
         else s.innerHTML=`<span class="status-tag status-failed">打包失败 (exit ${d.exit_code})</span>`;
         pollPackagingStatus();
       }
-    }catch(e){console.error(e);}
+    }catch(e){console.error(e);if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
   },1000);
 }
 
