@@ -242,38 +242,44 @@ def api_logout():
 
 # ==================== 用户管理路由（管理员） ====================
 
-@app.route("/api/users")
+@app.route("/api/users", methods=["GET", "POST"])
 @admin_required
 def api_users():
+    if request.method == "POST":
+        # 创建用户（前端 POST /api/users body={username,password,is_admin}）
+        data = request.get_json(silent=True) or {}
+        username = data.get("username", "").strip()
+        password = data.get("password", "")
+        is_admin = data.get("is_admin", False)
+        if not username or not password:
+            return jsonify({"error": "用户名和密码不能为空"}), 400
+        users = _load_users()
+        if username in users:
+            return jsonify({"error": "用户已存在"}), 409
+        users[username] = {
+            "password_hash": generate_password_hash(password),
+            "is_admin": is_admin,
+            "created_at": datetime.now(tz=_BJT).strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        _save_users(users)
+        return jsonify({"ok": True, "message": f"用户 {username} 已创建"})
+    # 列出用户
     users = _load_users()
     return jsonify({"users": [
-        {"username": u, "is_admin": info.get("is_admin", False)}
+        {
+            "username": u,
+            "is_admin": info.get("is_admin", False),
+            "created_at": info.get("created_at", "-"),
+        }
         for u, info in users.items()
     ]})
 
 
-@app.route("/api/users/create", methods=["POST"])
+@app.route("/api/users/<username>", methods=["DELETE"])
 @admin_required
-def api_users_create():
-    data = request.get_json(silent=True) or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
-    is_admin = data.get("is_admin", False)
-    if not username or not password:
-        return jsonify({"error": "用户名和密码不能为空"}), 400
-    users = _load_users()
-    if username in users:
-        return jsonify({"error": "用户已存在"}), 409
-    users[username] = {"password_hash": generate_password_hash(password), "is_admin": is_admin}
-    _save_users(users)
-    return jsonify({"ok": True, "message": f"用户 {username} 已创建"})
-
-
-@app.route("/api/users/delete", methods=["POST"])
-@admin_required
-def api_users_delete():
-    data = request.get_json(silent=True) or {}
-    username = data.get("username", "").strip()
+def api_users_delete(username):
+    # 删除用户（前端 DELETE /api/users/<name>）
+    username = username.strip()
     if not username:
         return jsonify({"error": "用户名不能为空"}), 400
     users = _load_users()
@@ -730,6 +736,71 @@ def api_delete(name):
 
 # ==================== 依赖库状态 ====================
 
+def _parse_manifest_lock(text):
+    """解析 manifest.lock → {path: sha256}"""
+    entries = {}
+    cur = {}
+    for line in text.splitlines():
+        s = line.strip()
+        if s == "[[entry]]":
+            if cur.get("path"):
+                entries[cur["path"]] = cur.get("sha256", "")
+            cur = {}
+        elif "=" in s and not s.startswith("#"):
+            k, v = s.split("=", 1)
+            cur[k.strip()] = v.strip().strip('"')
+    if cur.get("path"):
+        entries[cur["path"]] = cur.get("sha256", "")
+    return entries
+
+
+def _parse_manifest_toml(text):
+    """解析 manifest.toml → {lib_name: {source, role, configs: [paths]}}"""
+    import re
+    libs = {}
+    cur_lib = None
+    in_configs = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("[") and not s.startswith("[[") and s.endswith("]"):
+            cur_lib = s[1:-1]
+            libs[cur_lib] = {"configs": [], "source": "", "role": ""}
+            in_configs = False
+            continue
+        if cur_lib is None:
+            continue
+        if s.startswith("configs") and "[" in s:
+            in_configs = True
+            if "]" in s:
+                in_configs = False
+                libs[cur_lib]["configs"].extend(re.findall(r'"([^"]+)"', s))
+            continue
+        if in_configs:
+            if "]" in s:
+                in_configs = False
+            m = re.match(r'\s*"([^"]+)"', line)
+            if m:
+                libs[cur_lib]["configs"].append(m.group(1))
+            continue
+        if "=" in s:
+            k, v = s.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip('"')
+            if k in ("source", "role"):
+                libs[cur_lib][k] = v
+    return libs
+
+
+def _sha256_file(path):
+    """计算文件 SHA256"""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 @app.route("/api/deps")
 @login_required
 def api_deps():
@@ -738,43 +809,79 @@ def api_deps():
     manifest_toml = repo_root / "thirdparty" / "manifest.toml"
 
     if not manifest_lock.exists():
-        return jsonify({"error": "manifest.lock 不存在", "entries": []})
+        return jsonify({"error": "manifest.lock 不存在", "entries": [],
+                        "locked_count": 0, "disk_count": 0,
+                        "unchanged_count": 0, "changed_count": 0,
+                        "new_count": 0, "removed_count": 0})
 
-    lock_data = {}
-    for line in manifest_lock.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if "=" in line and not line.startswith("#"):
-            key, val = line.split("=", 1)
-            lock_data[key.strip()] = val.strip().strip('"')
+    # 1. 解析基线 SHA
+    lock_shas = _parse_manifest_lock(manifest_lock.read_text(encoding="utf-8"))
 
-    toml_libs = {}
-    if manifest_toml.exists():
-        cur_cat = None
-        for line in manifest_toml.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("[") and line.endswith("]"):
-                cur_cat = line[1:-1]
-            elif "=" in line and cur_cat:
-                key, val = line.split("=", 1)
-                key = key.strip()
-                val = val.strip().strip('"')
-                if key in ("path", "source", "role", "lib"):
-                    toml_libs.setdefault(cur_cat, {})[key] = val
+    # 2. 解析库元数据
+    toml_libs = _parse_manifest_toml(
+        manifest_toml.read_text(encoding="utf-8") if manifest_toml.exists() else "")
 
+    # path → lib_name 映射
+    path_to_lib = {}
+    for lib_name, info in toml_libs.items():
+        for p in info.get("configs", []):
+            path_to_lib[p] = lib_name
+
+    # 3. 收集所有涉及的路径（基线 + 配置声明）
+    all_paths = set(lock_shas.keys()) | set(path_to_lib.keys())
+
+    # 4. 逐个对比
     entries = []
-    for lib_name, info in sorted(toml_libs.items()):
-        path = info.get("path", "")
-        sha = lock_data.get(lib_name, "")
-        entries.append({
-            "status": "ok",
-            "lib": info.get("lib", lib_name),
-            "path": path,
-            "source": info.get("source", "-"),
-            "role": info.get("role", "-"),
-            "sha_short": sha[:12] if sha else "-",
-        })
+    unchanged = changed = new_count = removed = 0
 
-    return jsonify({"entries": entries})
+    for path in sorted(all_paths):
+        lib_name = path_to_lib.get(path, path.split("/")[-1].replace(".so", "").replace("lib", "", 1))
+        lib_info = toml_libs.get(lib_name, {})
+        full_path = repo_root / path
+        in_lock = path in lock_shas
+        in_disk = full_path.exists()
+
+        if in_lock and in_disk:
+            old_sha = lock_shas[path]
+            new_sha = _sha256_file(full_path)
+            if old_sha == new_sha:
+                status = "unchanged"
+                unchanged += 1
+            else:
+                status = "changed"
+                changed += 1
+        elif in_disk and not in_lock:
+            status = "new"
+            new_count += 1
+            old_sha = ""
+            new_sha = _sha256_file(full_path)
+        else:
+            status = "removed"
+            removed += 1
+            old_sha = lock_shas.get(path, "")
+            new_sha = ""
+
+        entry = {
+            "status": status,
+            "lib": lib_name,
+            "path": path,
+            "source": lib_info.get("source", "-"),
+            "role": lib_info.get("role", "-"),
+        }
+        if status == "changed":
+            entry["old_sha_short"] = old_sha[:12]
+            entry["new_sha_short"] = new_sha[:12]
+        entries.append(entry)
+
+    return jsonify({
+        "locked_count": len(lock_shas),
+        "disk_count": sum(1 for p in all_paths if (repo_root / p).exists()),
+        "unchanged_count": unchanged,
+        "changed_count": changed,
+        "new_count": new_count,
+        "removed_count": removed,
+        "entries": entries,
+    })
 
 
 # ==================== 重启服务 ====================
