@@ -1,0 +1,14 @@
+{
+  "users": {
+    "xiaoyi": {
+      "password_hash": "scrypt:32768:8:1$ySdxu47BJVkmfy6P$a800e0098ce76a0f385b156207b8b758588fc994428df117df4964480eade47231d3b21d5a24d6423208adcf70b80a01a0eb5c3bfcbc40fef8d2e8269dc496e9",
+      "is_admin": true,
+      "created_at": "2026-07-02 16:47:21"
+    },
+    "faban": {
+      "password_hash": "scrypt:32768:8:1$koShtFxBbJBk4xZi$3c4305d6dacbb5942d064e3410643c40c0fbe3e83da3ad7997d93b86d53d63fb1d608a16ebca9081f345feaf0525ed3b4dd01295e4af8ee42f3a99cb767d7ab6",
+      "is_admin": false,
+      "created_at": "2026-07-02 17:27:46"
+    }
+  }
+}

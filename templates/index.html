@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cluster 发版工具</title>
+<style>
+  :root {
+    --bg: #f1f5f9;
+    --surface: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --text-hint: #94a3b8;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-light: #eef2ff;
+    --green: #059669;
+    --green-bg: #ecfdf5;
+    --green-border: #d1fae5;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --red-border: #fee2e2;
+    --amber: #d97706;
+    --amber-bg: #fffbeb;
+    --gray-bg: #f8fafc;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.06);
+    --shadow-hover: 0 2px 4px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.7;
+  }
+
+  /* ====== 登录页 ====== */
+  #login-page {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 20px;
+  }
+  .login-card {
+    width: 380px; max-width: 100%; padding: 36px 32px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: 0 4px 24px rgba(0,0,0,.08);
+    text-align: center;
+  }
+  .login-card h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; color: var(--accent); }
+  .login-card .login-sub { color: var(--text-muted); font-size: 13px; margin-bottom: 28px; }
+  .login-card label { display: block; text-align: left; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; margin-top: 14px; }
+  .login-card input[type=text],
+  .login-card input[type=password] {
+    width: 100%; padding: 10px 14px; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 14px; font-family: inherit;
+    transition: border-color .2s; background: var(--gray-bg);
+  }
+  .login-card input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+  .login-card button {
+    width: 100%; padding: 11px; margin-top: 22px;
+    background: var(--accent); color: #fff; border: none;
+    border-radius: 8px; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: all .15s; font-family: inherit;
+  }
+  .login-card button:hover { background: var(--accent-hover); box-shadow: 0 2px 8px rgba(79,70,229,.3); }
+
+  /* ====== 主应用 ====== */
+  #main-app { display: none; padding: 24px 20px; max-width: 1320px; margin: 0 auto; }
+  .app-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+  }
+  .app-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -.3px; }
+  .app-header-right { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+  .user-badge { color: var(--accent); font-weight: 600; }
+  .admin-badge { background: var(--accent-light); color: var(--accent); padding: 2px 10px; border-radius: 5px; font-size: 11px; font-weight: 600; }
+
+  h2 { font-size: 15px; font-weight: 600; }
+  .subtitle { color: var(--text-muted); font-size: 13px; margin: 2px 0 6px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; margin-bottom: 20px;
+    box-shadow: var(--shadow); transition: box-shadow .2s;
+  }
+  .card:hover { box-shadow: var(--shadow-hover); }
+  .card-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border);
+  }
+  .card-header h2 { margin-bottom: 0; }
+  .card-actions { display: flex; align-items: center; gap: 10px; }
+
+  .stats { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat { padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; background: var(--gray-bg); border: 1px solid var(--border); }
+  .stat-label { color: var(--text-muted); margin-right: 2px; }
+  .stat-value { font-weight: 700; margin-left: 2px; }
+  .stat-changed { background: var(--red-bg); border-color: var(--red-border); }
+  .stat-changed .stat-value { color: var(--red); }
+  .stat-new { background: var(--amber-bg); }
+  .stat-new .stat-value { color: var(--amber); }
+
+  .deps-table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { text-align: left; padding: 10px 14px; background: var(--gray-bg); color: var(--text-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  tbody tr:nth-child(even) td { background: var(--gray-bg); }
+  tbody tr:hover td { background: var(--accent-light); }
+
+  .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .badge-unchanged { background: var(--green-bg); color: var(--green); }
+  .badge-changed  { background: var(--red-bg); color: var(--red); }
+  .badge-new      { background: var(--amber-bg); color: var(--amber); }
+  .badge-removed  { background: var(--gray-bg); color: var(--text-muted); border: 1px dashed var(--border); }
+
+  .btn { display: inline-flex; align-items: center; gap: 4px; padding: 8px 18px; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; text-decoration: none; transition: all .15s; white-space: nowrap; font-family: inherit; }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:active { transform: translateY(0); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 2px 8px rgba(79,70,229,.3); }
+  .btn-primary:disabled { background: var(--text-hint); cursor: not-allowed; box-shadow: none; transform: none; }
+  .btn-sm { padding: 5px 14px; font-size: 12px; border-radius: 6px; }
+  .btn-sm:hover { transform: none; }
+  .btn-outline { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
+  .btn-outline:hover { background: var(--gray-bg); color: var(--text); border-color: var(--accent); transform: none; }
+  .btn-danger { background: var(--surface); color: var(--red); border: 1px solid var(--red-border); }
+  .btn-danger:hover { background: var(--red-bg); transform: none; }
+
+  .config-select { display: inline-flex; gap: 6px; }
+  .config-btn { padding: 8px 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s; font-family: inherit; }
+  .config-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .config-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .release-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+  .log-box { background: #0f172a; color: #a5f0c5; padding: 18px 20px; border-radius: 10px; font-family: "Cascadia Code","Consolas","JetBrains Mono","Fira Code",monospace; font-size: 12px; line-height: 1.6; max-height: 420px; overflow-y: auto; white-space: pre-wrap; margin-top: 14px; border: 1px solid #1e293b; }
+  .log-box:empty { display: none; }
+
+  .status-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; }
+  .status-running { background: var(--amber-bg); color: var(--amber); border: 1px solid #fde68a; }
+  .status-success { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .status-failed  { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+
+  .history-item { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; cursor: pointer; transition: all .18s; box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+  .history-item:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+  .history-item.expanded { border-color: var(--accent); border-left: 3px solid var(--accent); background: var(--accent-light); }
+  .history-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .history-name { font-weight: 600; font-size: 14px; font-family: monospace; color: var(--text); word-break: break-all; }
+  .history-meta { color: var(--text-muted); font-size: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .history-actions { display: inline-flex; gap: 6px; margin-left: 4px; }
+  .history-manifest { display: none; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .history-item.expanded .history-manifest { display: block; }
+
+  .manifest-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .manifest-tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+  .tag-bin     { background: rgba(59,130,246,.14); color: #2563eb; }
+  .tag-lib     { background: rgba(139,92,246,.14); color: #7c3aed; }
+  .tag-hmi     { background: rgba(236,72,153,.14); color: #db2777; }
+  .tag-config  { background: rgba(245,158,11,.14); color: #d97706; }
+  .tag-script  { background: rgba(16,185,129,.14); color: #059669; }
+  .tag-doc     { background: rgba(100,116,139,.14); color: #475569; }
+  .tag-other   { background: rgba(100,116,139,.1);  color: #64748b; }
+
+  .manifest-build-info { padding: 10px 14px; background: var(--gray-bg); border-radius: 8px; margin-bottom: 10px; font-size: 12px; color: var(--text-muted); font-family: monospace; line-height: 1.6; border: 1px solid var(--border); }
+  .manifest-build-info b { color: var(--text); }
+
+  .manifest-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: "Cascadia Code","Consolas",monospace; }
+  .manifest-table th { text-align: left; padding: 7px 10px; border-bottom: 2px solid var(--border); font-family: sans-serif; font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }
+  .manifest-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .manifest-table tbody tr:nth-child(even) td:not(.manifest-cat-header td) { background: var(--gray-bg); }
+  .manifest-table tr:hover td { background: var(--accent-light) !important; }
+  .manifest-cat-header td { font-family: sans-serif; font-size: 12px; font-weight: 700; color: var(--accent); padding: 10px 10px 4px; border-bottom: none; }
+
+  /* modal 弹窗 */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(15,23,42,.45); z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-dialog {
+    background: var(--surface); border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.2);
+    width: 620px; max-width: 92vw; max-height: 82vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 24px; border-bottom: 1px solid var(--border);
+  }
+  .modal-header h2 { margin: 0; }
+  .modal-body { padding: 20px 24px; overflow-y: auto; flex: 1; }
+
+  .admin-form { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: flex-end; }
+  .admin-form input { padding: 7px 12px; border: 1px solid var(--border); border-radius: 7px; font-size: 13px; font-family: inherit; background: var(--gray-bg); }
+  .admin-form input:focus { outline: none; border-color: var(--accent); }
+  .admin-form label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+
+  .empty   { color: var(--text-hint); text-align: center; padding: 32px 24px; font-size: 13px; }
+  .loading { color: var(--text-muted); text-align: center; padding: 24px; }
+  .error-msg { color: var(--red); font-size: 13px; padding: 8px 0; }
+  .error-inline { color: var(--red); font-size: 12px; margin-top: 8px; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-hint); }
+
+  @media (max-width: 768px) {
+    #main-app { padding: 12px; }
+    .card { padding: 16px; }
+    .history-top { flex-direction: column; align-items: flex-start; }
+    .history-meta { flex-direction: column; align-items: flex-start; }
+    .login-card { padding: 24px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ====== 登录页 ====== -->
+<div id="login-page">
+  <div class="login-card">
+    <h1>cluster 发版工具</h1>
+    <p class="login-sub">编译打包 · 依赖追踪 · 发版历史</p>
+    <form onsubmit="doLogin();return false">
+      <label for="login-username">用户名</label>
+      <input type="text" id="login-username" placeholder="请输入用户名" autocomplete="username">
+      <label for="login-password">密码</label>
+      <input type="password" id="login-password" placeholder="请输入密码" autocomplete="current-password">
+      <button type="submit">登 录</button>
+      <div id="login-error" class="error-inline" style="display:none"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ====== 主应用 ====== -->
+<div id="main-app">
+
+<div class="app-header">
+  <h1>cluster 发版工具</h1>
+  <div class="app-header-right">
+    <span class="user-badge" id="header-user"></span>
+    <span class="admin-badge" id="header-admin" style="display:none">管理员</span>
+    <button class="btn btn-sm btn-outline" id="admin-btn" style="display:none" onclick="openAdminModal()">用户管理</button>
+    <button class="btn btn-sm btn-outline" id="restart-btn" style="display:none" onclick="restartService()">重启服务</button>
+    <button class="btn btn-sm btn-outline" onclick="doLogout()">退出</button>
+  </div>
+</div>
+
+<!-- 编译打包（置顶：最常用） -->
+<div class="card">
+  <div class="card-header">
+    <h2>编译打包 <span style="font-size:10px;color:var(--text-hint);font-weight:400">v2</span></h2>
+    <div id="release-status"></div>
+  </div>
+  <p class="subtitle">一键交叉编译 + 打全量部署包（依赖库 + HMI 资源 + BUILD_MANIFEST）</p>
+  <div class="release-controls">
+    <div class="config-select">
+      <label style="font-size:12px;color:var(--text-muted);margin-right:2px">分支</label>
+      <select id="branch-select" onchange="doCheckout()" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);font-family:inherit;cursor:pointer;max-width:180px">
+        <option>加载中...</option>
+      </select>
+    </div>
+    <div class="config-select">
+      <button class="config-btn active" id="cfg-low" onclick="selectConfig('low')">8675 低配</button>
+      <button class="config-btn" id="cfg-high" onclick="selectConfig('high')">8676 高配</button>
+    </div>
+    <button class="btn btn-primary" id="release-btn" onclick="startRelease()">编译并打包</button>
+    <button class="btn btn-danger" id="cancel-btn" onclick="cancelRelease()" style="display:none">取消打包</button>
+  </div>
+  <div id="release-log" class="log-box"></div>
+</div>
+
+<!-- 发版历史（置顶） -->
+<div class="card">
+  <div class="card-header">
+    <h2>发版历史 <span style="font-size:11px;color:var(--text-hint);font-weight:400">(北京时间)</span></h2>
+    <button class="btn btn-sm btn-outline" onclick="loadHistory()">刷新</button>
+  </div>
+  <div id="history-list" class="loading">加载中...</div>
+</div>
+
+<!-- 依赖库状态 -->
+<div class="card">
+  <div class="card-header">
+    <h2>依赖库状态（.so 变更追踪）</h2>
+    <button class="btn btn-sm btn-outline" onclick="loadDeps()">刷新</button>
+  </div>
+  <div id="deps-stats" class="loading">加载中...</div>
+  <div class="deps-table-wrap">
+    <table id="deps-table" style="display:none;">
+      <thead><tr><th>状态</th><th>库名</th><th>文件</th><th>来源</th><th>用途</th><th>sha256 变化</th></tr></thead>
+      <tbody id="deps-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 用户管理弹窗（仅管理员） -->
+<div class="modal-overlay" id="admin-modal" style="display:none" onclick="if(event.target===this)closeAdminModal()">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h2>用户管理</h2>
+      <button class="btn btn-sm btn-outline" onclick="closeAdminModal()">&#10005; 关闭</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <button class="btn btn-sm btn-outline" onclick="loadUsers()">刷新列表</button>
+      </div>
+      <div id="users-list" class="loading">点击刷新加载</div>
+      <div class="admin-form">
+        <div>
+          <label>用户名</label>
+          <input type="text" id="new-user-name" placeholder="新用户名" style="width:130px">
+        </div>
+        <div>
+          <label>密码</label>
+          <input type="password" id="new-user-pwd" placeholder="密码" style="width:130px">
+        </div>
+        <div>
+          <label style="display:flex;align-items:center;gap:4px">
+            <input type="checkbox" id="new-user-admin"> 管理员
+          </label>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="doCreateUser()">添加用户</button>
+        <div id="admin-error" class="error-inline" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main-app -->
+
+<script>
+// ==================== 认证 ====================
+let currentUser = null, isAdmin = false;
+
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/me');
+    if (!r.ok) { showLogin(); return; }
+    const d = await r.json();
+    if (!d.logged_in) { showLogin(); return; }
+    currentUser = d.username; isAdmin = d.is_admin;
+    showMainApp();
+  } catch(e) { showLogin(); }
+}
+
+function showLogin() {
+  document.getElementById('login-page').style.display = 'flex';
+  document.getElementById('main-app').style.display = 'none';
+  document.getElementById('admin-modal').style.display = 'none';
+  document.getElementById('header-admin').style.display = 'none';
+  document.getElementById('admin-btn').style.display = 'none';
+  document.getElementById('restart-btn').style.display = 'none';
+  stopBusyPoll();
+}
+
+function showMainApp() {
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('main-app').style.display = 'block';
+  document.getElementById('header-user').textContent = currentUser;
+  const showAdmin = isAdmin ? '' : 'none';
+  document.getElementById('header-admin').style.display = showAdmin;
+  document.getElementById('admin-btn').style.display = showAdmin;
+  document.getElementById('restart-btn').style.display = showAdmin;
+  document.getElementById('admin-modal').style.display = 'none';
+  loadBranches(); loadDeps(); loadHistory();
+  startBusyPoll();
+}
+
+async function doLogin() {
+  const u = document.getElementById('login-username').value.trim();
+  const p = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if (!u || !p) { errEl.textContent = '请输入用户名和密码'; errEl.style.display = ''; return; }
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username:u, password:p})
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error || '登录失败'; errEl.style.display = ''; return; }
+    currentUser = d.username; isAdmin = d.is_admin;
+    document.getElementById('login-password').value = '';
+    showMainApp();
+  } catch(e) { errEl.textContent = '网络错误'; errEl.style.display = ''; }
+}
+
+async function doLogout() {
+  try { await fetch('/api/logout', {method:'POST'}); } catch(e) {}
+  currentUser = null; isAdmin = false;
+  showLogin();
+  document.getElementById('login-password').value = '';
+}
+
+// ==================== 用户管理弹窗 ====================
+function openAdminModal() {
+  document.getElementById('admin-modal').style.display = 'flex';
+  loadUsers();
+}
+function closeAdminModal() {
+  document.getElementById('admin-modal').style.display = 'none';
+}
+
+async function loadUsers() {
+  const el = document.getElementById('users-list');
+  try {
+    const r = await fetch('/api/users'); if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    if (!d.users || d.users.length === 0) { el.innerHTML = '<div class="empty">暂无用户</div>'; return; }
+    let h = '<table><thead><tr><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead><tbody>';
+    for (const u of d.users) {
+      const role = u.is_admin ? '<span class="badge" style="background:var(--accent-light);color:var(--accent)">管理员</span>' : '<span style="color:var(--text-muted)">普通用户</span>';
+      h += `<tr><td style="font-weight:500">${u.username}</td><td>${role}</td><td style="font-size:12px;color:var(--text-muted)">${u.created_at||'-'}</td>
+        <td><button class="btn btn-sm btn-danger" onclick="doDeleteUser('${u.username}')">删除</button></td></tr>`;
+    }
+    h += '</tbody></table>'; el.innerHTML = h;
+  } catch(e) { el.innerHTML = `<div class="error-msg">加载失败: ${e.message}</div>`; }
+}
+
+async function doCreateUser() {
+  const name = document.getElementById('new-user-name').value.trim();
+  const pwd = document.getElementById('new-user-pwd').value;
+  const admin = document.getElementById('new-user-admin').checked;
+  const errEl = document.getElementById('admin-error');
+  errEl.style.display = 'none';
+  if (!name || !pwd) { errEl.textContent = '用户名和密码不能为空'; errEl.style.display = ''; return; }
+  try {
+    const r = await fetch('/api/users', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username:name, password:pwd, is_admin:admin})
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error || '创建失败'; errEl.style.display = ''; return; }
+    document.getElementById('new-user-name').value = '';
+    document.getElementById('new-user-pwd').value = '';
+    document.getElementById('new-user-admin').checked = false;
+    loadUsers();
+  } catch(e) { errEl.textContent = '网络错误'; errEl.style.display = ''; }
+}
+
+async function doDeleteUser(username) {
+  if (!confirm(`确定删除用户 "${username}"？`)) return;
+  try {
+    const r = await fetch('/api/users/' + username, {method:'DELETE'});
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || '删除失败'); return; }
+    loadUsers();
+  } catch(e) { alert('删除失败: ' + e.message); }
+}
+
+// ==================== 配置 ====================
+let currentConfig = 'low';
+let pollTimer = null;
+let busyTimer = null;
+let currentTaskId = null;
+
+function selectConfig(cfg) {
+  currentConfig = cfg;
+  document.getElementById('cfg-low').classList.toggle('active',cfg==='low');
+  document.getElementById('cfg-high').classList.toggle('active',cfg==='high');
+}
+
+// ==================== 打包状态轮询（多用户实时同步） ====================
+function startBusyPoll() {
+  if (busyTimer) return;
+  busyTimer = setInterval(pollPackagingStatus, 2000);
+  pollPackagingStatus();
+}
+
+function stopBusyPoll() {
+  if (busyTimer) { clearInterval(busyTimer); busyTimer = null; }
+}
+
+async function pollPackagingStatus() {
+  const btn = document.getElementById('release-btn');
+  const cancelBtn = document.getElementById('cancel-btn');
+  const statusEl = document.getElementById('release-status');
+  if (!btn || !statusEl) return;
+  if (pollTimer) return;
+  try {
+    const r = await fetch('/api/packaging-status');
+    const d = await r.json();
+    if (d.busy) {
+      btn.disabled = true;
+      currentTaskId = d.task_id || null;
+      if (cancelBtn) cancelBtn.style.display = '';
+      statusEl.innerHTML = `<span class="status-tag status-running">${d.builder||'其他用户'} 正在打包 (${d.config})...</span>`;
+    } else {
+      btn.disabled = false;
+      currentTaskId = null;
+      if (cancelBtn) cancelBtn.style.display = 'none';
+      if (statusEl.textContent.includes('正在打包')) statusEl.innerHTML = '';
+    }
+  } catch(e) {}
+}
+
+// ==================== 分支切换 ====================
+let currentBranch = '';
+
+async function loadBranches() {
+  const sel = document.getElementById('branch-select');
+  try {
+    const r = await fetch('/api/branches');
+    if (!r.ok) { sel.innerHTML = '<option>获取失败</option>'; return; }
+    const d = await r.json();
+    currentBranch = d.current;
+    sel.innerHTML = d.branches.map(b =>
+      `<option value="${b}" ${b === d.current ? 'selected' : ''}>${b}${b === d.current ? ' ✓' : ''}</option>`
+    ).join('');
+  } catch(e) { sel.innerHTML = '<option>加载失败</option>'; }
+}
+
+async function doCheckout() {
+  const sel = document.getElementById('branch-select');
+  const branch = sel.value;
+  if (!branch || branch === currentBranch) return;
+  const statusEl = document.getElementById('release-status');
+  if (!confirm(`确定切换到分支 "${branch}"？\n（工作区需无未提交改动）`)) {
+    loadBranches(); return;  // 撤回选择
+  }
+  statusEl.innerHTML = `<span class="status-tag status-running">切换到 ${branch}...</span>`;
+  try {
+    const r = await fetch('/api/checkout', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({branch})
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      statusEl.innerHTML = `<span class="status-tag status-failed">${d.error || '切换失败'}</span>`;
+      loadBranches(); return;
+    }
+    currentBranch = branch;
+    statusEl.innerHTML = `<span class="status-tag status-success">已切换到 ${branch}</span>`;
+    loadBranches(); loadDeps(); loadHistory();
+  } catch(e) {
+    statusEl.innerHTML = `<span class="status-tag status-failed">网络错误</span>`;
+    loadBranches();
+  }
+}
+
+async function loadDeps() {
+  const statsEl=document.getElementById('deps-stats'),tableEl=document.getElementById('deps-table'),bodyEl=document.getElementById('deps-body');
+  statsEl.className='loading';statsEl.textContent='加载中...';tableEl.style.display='none';
+  try{
+    const r=await fetch('/api/deps');if(!r.ok)throw new Error(await r.text());const d=await r.json();
+    let h='<div class="stats">';
+    h+=`<span class="stat"><span class="stat-label">基线</span> <span class="stat-value">${d.locked_count}</span></span>`;
+    h+=`<span class="stat"><span class="stat-label">磁盘</span> <span class="stat-value">${d.disk_count}</span></span>`;
+    h+=`<span class="stat"><span class="stat-label">未变更</span> <span class="stat-value">${d.unchanged_count}</span></span>`;
+    if(d.changed_count>0)h+=`<span class="stat stat-changed"><span class="stat-label">已变更</span> <span class="stat-value">${d.changed_count}</span></span>`;
+    if(d.new_count>0)h+=`<span class="stat stat-new"><span class="stat-label">新增</span> <span class="stat-value">${d.new_count}</span></span>`;
+    if(d.removed_count>0)h+=`<span class="stat"><span class="stat-label">删除</span> <span class="stat-value">${d.removed_count}</span></span>`;
+    h+='</div>';statsEl.className='';statsEl.innerHTML=h;
+    if(!d.entries.length){statsEl.innerHTML+='<div class="empty">无 .so 记录</div>';return;}
+    bodyEl.innerHTML=d.entries.map(e=>{
+      const badge=`badge-${e.status}`,st={unchanged:'未变更',changed:'已变更',new:'新增',removed:'已删除'}[e.status];
+      let sc='';if(e.status==='changed')sc=`<span style="color:var(--red)">${e.old_sha_short}</span> &rarr; <span style="color:var(--red)">${e.new_sha_short}</span>`;
+      return `<tr><td><span class="badge ${badge}">${st}</span></td><td style="font-weight:500">${e.lib}</td><td style="font-family:monospace;font-size:12px">${e.path}</td><td style="font-size:12px;color:var(--text-muted)">${e.source||'-'}</td><td style="font-size:12px;color:var(--text-muted)">${e.role||'-'}</td><td style="font-family:monospace;font-size:12px">${sc}</td></tr>`;
+    }).join('');
+    tableEl.style.display='';
+  }catch(e){statsEl.className='';statsEl.innerHTML=`<div class="error-msg">加载失败: ${e.message}</div>`;}
+}
+
+async function startRelease(){
+  const btn=document.getElementById('release-btn'),cancelBtn=document.getElementById('cancel-btn'),logEl=document.getElementById('release-log'),statusEl=document.getElementById('release-status');
+  btn.disabled=true;cancelBtn.style.display='none';logEl.textContent='';statusEl.innerHTML='<span class="status-tag status-running">打包中...</span>';
+  try{
+    const r=await fetch('/api/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:currentConfig})});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===409){statusEl.innerHTML=`<span class="status-tag status-failed">${d.message||'已有打包任务在运行'}</span>`;return;}
+    if(!r.ok)throw new Error(d.error||await r.text());
+    currentTaskId=d.task_id;cancelBtn.style.display='';
+    pollReleaseStatus(d.task_id);
+  }catch(e){btn.disabled=false;statusEl.innerHTML=`<span class="status-tag status-failed">失败: ${e.message}</span>`;}
+}
+
+async function cancelRelease(){
+  if(!currentTaskId){
+    alert('取消失败：未找到当前任务ID（可能页面状态异常，请刷新重试）');
+    return;
+  }
+  const cancelBtn=document.getElementById('cancel-btn');
+  const statusEl=document.getElementById('release-status');
+  cancelBtn.disabled=true;cancelBtn.textContent='取消中...';
+  try{
+    const r=await fetch(`/api/release/${currentTaskId}/cancel`,{method:'POST'});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){
+      cancelBtn.textContent='取消打包';cancelBtn.disabled=false;
+      statusEl.innerHTML=`<span class="status-tag status-failed">${d.error||'取消失败'}</span>`;
+      return;
+    }
+    cancelBtn.style.display='none';
+    statusEl.innerHTML='<span class="status-tag status-running" style="background:var(--orange);color:#fff">已请求取消，等待当前编译完成...</span>';
+  }catch(e){
+    cancelBtn.textContent='取消打包';cancelBtn.disabled=false;
+    statusEl.innerHTML=`<span class="status-tag status-failed">取消失败: ${e.message}</span>`;
+  }
+}
+
+function pollReleaseStatus(taskId){
+  const cancelBtn=document.getElementById('cancel-btn');
+  if(pollTimer)clearInterval(pollTimer);
+  pollTimer=setInterval(async()=>{
+    try{
+      const r=await fetch(`/api/release/${taskId}`);if(!r.ok)throw new Error(await r.text());
+      const d=await r.json();document.getElementById('release-log').textContent=d.log;
+      if(d.status!=='running'){
+        clearInterval(pollTimer);pollTimer=null;currentTaskId=null;
+        const s=document.getElementById('release-status'),btn=document.getElementById('release-btn');
+        cancelBtn.style.display='none';btn.disabled=false;
+        if(d.status==='success'){s.innerHTML='<span class="status-tag status-success">打包成功</span>';loadHistory();}
+        else if(d.status==='cancelled'){s.innerHTML='<span class="status-tag status-failed">已取消</span>';}
+        else s.innerHTML=`<span class="status-tag status-failed">打包失败 (exit ${d.exit_code})</span>`;
+        pollPackagingStatus();
+      }
+    }catch(e){console.error(e);}
+  },1000);
+}
+
+const CAT_LABELS={bin:'编译产物',lib:'依赖库',hmi:'HMI资源',config:'配置文件',script:'部署脚本',doc:'说明文档',other:'其他'};
+const CAT_ORDER=['bin','lib','hmi','config','script','doc','other'];
+
+function renderManifest(m){
+  if(!m)return '<div class="empty" style="padding:12px">(无 BUILD_MANIFEST)</div>';
+  const b=m.build||{};
+  const bi=`<div class="manifest-build-info">config: <b>${b.config||'?'}</b> &nbsp;|&nbsp; branch: ${b.git_branch||'?'} &nbsp;|&nbsp; commit: <b>${b.git_commit||'?'}</b> &nbsp;|&nbsp; ${b.git_dirty||'?'} &nbsp;|&nbsp; 打包时间: ${b.pack_time||'?'} &nbsp;|&nbsp; 文件总数: <b>${m.total_files||'?'}</b></div>`;
+  const s=m.summary||{};
+  const th=Object.keys(s).length?`<div class="manifest-summary">${CAT_ORDER.filter(c=>s[c]).map(c=>`<span class="manifest-tag tag-${c}">${CAT_LABELS[c]||c} ${s[c]}</span>`).join('')}</div>`:'';
+  const fs=m.files||[];
+  let tb='<table class="manifest-table"><tbody>';
+  for(const c of CAT_ORDER){
+    const cf=fs.filter(f=>(f.category||'other')===c);if(!cf.length)continue;
+    tb+=`<tr class="manifest-cat-header"><td colspan="5">${CAT_LABELS[c]||c} (${cf.length})</td></tr>`;
+    tb+='<tr><th>文件路径</th><th>来源</th><th>说明</th><th>SHA256</th><th>大小</th></tr>';
+    for(const f of cf)tb+=`<tr><td>${f.path||'?'}</td><td style="font-family:sans-serif;font-size:11px;color:var(--text-muted)">${f.source||'-'}</td><td style="font-family:sans-serif;font-size:11px;color:var(--text-muted)">${f.desc||'-'}</td><td style="color:var(--text-hint)">${f.sha_short||'-'}</td><td>${f.size_human||'?'}</td></tr>`;
+  }
+  tb+='</tbody></table>';return bi+th+tb;
+}
+
+async function loadHistory(){
+  const el=document.getElementById('history-list');el.className='loading';el.textContent='加载中...';
+  try{
+    const r=await fetch('/api/history');if(!r.ok)throw new Error(await r.text());
+    const d=await r.json();
+    if(!d.history.length){el.className='';el.innerHTML='<div class="empty">暂无发版记录</div>';return;}
+    el.className='';el.innerHTML=d.history.map((h,i)=>{
+      const db=h.dirty==='clean'?'<span class="badge badge-unchanged">clean</span>':'<span class="badge badge-changed">dirty</span>';
+      const mh=renderManifest(h.manifest);
+      return `<div class="history-item" onclick="toggleHistory(${i})"><div class="history-top"><span class="history-name">${h.name}</span><span class="history-meta">${h.cfg_num} &nbsp;|&nbsp; ${h.commit} &nbsp; ${db} &nbsp;|&nbsp; ${h.size_mb}MB &nbsp;|&nbsp; ${h.mtime}${h.builder?' &nbsp;|&nbsp; 打包: <b>'+h.builder+'</b>':' &nbsp;|&nbsp; <span style="color:var(--text-hint)">CLI</span>'}<span class="history-actions"><a class="btn btn-sm btn-outline" href="/api/download/${h.name}" onclick="event.stopPropagation()" download>下载</a><button class="btn btn-sm btn-danger" onclick="deletePackage(event,'${h.name}')">删除</button></span></span></div><div class="history-manifest">${mh}</div></div>`;
+    }).join('');
+  }catch(e){el.className='';el.innerHTML=`<div class="error-msg">加载失败: ${e.message}</div>`;}
+}
+
+function toggleHistory(idx){const items=document.querySelectorAll('.history-item');if(items[idx])items[idx].classList.toggle('expanded');}
+
+async function deletePackage(ev,name){ev.stopPropagation();
+  if(!confirm(`确定删除 ${name}？\n（同时删除配套 .manifest.toml）`))return;
+  try{const r=await fetch('/api/delete/'+name,{method:'DELETE'});const d=await r.json().catch(()=>({}));
+    if(!r.ok){alert(d.error||'删除失败');return;}alert(d.message||'已删除');loadHistory();
+  }catch(e){alert('删除失败: '+e.message);}
+}
+
+async function restartService(){
+  if(!confirm('确定重启服务？\n更新 app.py/package.py 后需要重启生效。'))return;
+  try{
+    await fetch('/api/restart',{method:'POST'});
+    document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:18px;color:#64748b;">服务正在重启，请等待 5 秒...</div>';
+    setTimeout(()=>location.reload(),5000);
+  }catch(e){
+    setTimeout(()=>location.reload(),3000);
+  }
+}
+
+checkAuth();
+</script>
+</body>
+</html>
