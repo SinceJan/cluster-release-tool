@@ -44,6 +44,22 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "cluster-release-tool-secret-2024")
 
 USERS_FILE = Path(__file__).parent / "users.json"
+DOWNLOAD_TOKEN_FILE = Path(__file__).parent / "download_token.txt"
+
+
+def _ensure_download_token():
+    """首次运行自动生成 32 位 hex token。"""
+    if not DOWNLOAD_TOKEN_FILE.exists():
+        DOWNLOAD_TOKEN_FILE.write_text(uuid.uuid4().hex, encoding="utf-8")
+    return DOWNLOAD_TOKEN_FILE.read_text(encoding="utf-8").strip()
+
+
+def _reset_download_token():
+    """重新生成 token（管理员手动触发）。"""
+    new_token = uuid.uuid4().hex
+    DOWNLOAD_TOKEN_FILE.write_text(new_token, encoding="utf-8")
+    return new_token
+
 
 # ==================== 全局状态 ====================
 
@@ -755,6 +771,55 @@ def api_delete(name):
         if sidecar.exists():
             sidecar.unlink()
     return jsonify({"ok": True, "message": f"已删除 {name}"})
+
+
+# ==================== 直链下载（免登录 token） ====================
+
+@app.route("/latest")
+def download_latest():
+    """免登录直链下载最新包。
+
+    用法：
+      /latest?token=xxx               → 最新包（任意配置）
+      /latest?token=xxx&config=8675   → 最新 8675 低配包
+      /latest?token=xxx&config=8676   → 最新 8676 高配包
+    """
+    token = request.args.get("token", "").strip()
+    expected = _ensure_download_token()
+    if not token or token != expected:
+        return jsonify({"error": "token 无效或缺失"}), 401
+
+    archive_dir = get_output_dir() / "archive"
+    if not archive_dir.exists():
+        return jsonify({"error": "暂无可用包"}), 404
+
+    zips = sorted(archive_dir.glob("cluster_*.zip"),
+                  key=lambda p: p.stat().st_mtime, reverse=True)
+
+    config_filter = request.args.get("config", "").strip()
+    if config_filter:
+        config_map = {"low": "8675", "high": "8676", "8675": "8675", "8676": "8676"}
+        cfg_num = config_map.get(config_filter, config_filter)
+        zips = [z for z in zips if f"_{cfg_num}_" in z.name]
+
+    if not zips:
+        return jsonify({"error": f"暂无可用包{f' (config={config_filter})' if config_filter else ''}"}), 404
+
+    latest = zips[0]
+    return send_file(str(latest), as_attachment=True, download_name=latest.name)
+
+
+@app.route("/api/download-token", methods=["GET", "POST"])
+@login_required
+def api_download_token():
+    """查看/重置直链下载 token。GET 所有用户可看，POST 仅管理员。"""
+    if request.method == "POST":
+        if not session.get("is_admin"):
+            return jsonify({"error": "仅管理员可重置 token"}), 403
+        new_token = _reset_download_token()
+        return jsonify({"ok": True, "token": new_token})
+    token = _ensure_download_token()
+    return jsonify({"token": token})
 
 
 # ==================== 依赖库状态 ====================

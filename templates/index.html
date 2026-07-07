@@ -266,6 +266,25 @@
   <div id="release-log" class="log-box"></div>
 </div>
 
+<!-- 直链下载（免登录） -->
+<div class="card" id="direct-download-card" style="display:none">
+  <div class="card-header">
+    <h2>直链下载 <span style="font-size:11px;color:var(--text-hint);font-weight:400">(免登录，集成到外部工具)</span></h2>
+    <button class="btn btn-sm btn-outline" id="reset-token-btn" onclick="resetDownloadToken()" style="display:none">重置 Token</button>
+  </div>
+  <div style="padding:0 16px 16px">
+    <p style="font-size:13px;color:var(--text-secondary);margin:8px 0">外部工具只需访问以下 URL 即可直接下载最新包（无需登录）：</p>
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0">
+      <code id="direct-url-low" style="flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;word-break:all;display:block"></code>
+      <button class="btn btn-sm btn-outline" onclick="copyDirectUrl('low')">复制</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0">
+      <code id="direct-url-high" style="flex:1;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;word-break:all;display:block"></code>
+      <button class="btn btn-sm btn-outline" onclick="copyDirectUrl('high')">复制</button>
+    </div>
+  </div>
+</div>
+
 <!-- 发版历史（置顶） -->
 <div class="card">
   <div class="card-header">
@@ -360,6 +379,7 @@ function showMainApp() {
   document.getElementById('restart-btn').style.display = showAdmin;
   document.getElementById('admin-modal').style.display = 'none';
   loadBranches(); loadDeps(); loadHistory();
+  loadDirectDownloadUrl();
   startBusyPoll();
 }
 
@@ -387,6 +407,47 @@ async function doLogout() {
   currentUser = null; isAdmin = false;
   showLogin();
   document.getElementById('login-password').value = '';
+}
+
+// ==================== 直链下载 ====================
+async function loadDirectDownloadUrl() {
+  try {
+    const r = await fetch('/api/download-token');
+    if (!r.ok) return;
+    const d = await r.json();
+    const base = location.origin;
+    document.getElementById('direct-url-low').textContent = `${base}/latest?token=${d.token}&config=8675`;
+    document.getElementById('direct-url-high').textContent = `${base}/latest?token=${d.token}&config=8676`;
+    document.getElementById('direct-download-card').style.display = '';
+    document.getElementById('reset-token-btn').style.display = isAdmin ? '' : 'none';
+  } catch(e) { console.error(e); }
+}
+function copyDirectUrl(config) {
+  const el = document.getElementById('direct-url-' + config);
+  const text = el.textContent;
+  const btn = el.nextElementSibling;
+  const orig = btn.textContent;
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    btn.textContent = '已复制!';
+  } catch(e) {
+    btn.textContent = '按 Ctrl+C';
+  }
+  document.body.removeChild(ta);
+  setTimeout(() => btn.textContent = orig, 1500);
+}
+async function resetDownloadToken() {
+  if (!confirm('重置后旧 URL 立即失效，外部工具需要更新地址。确认重置？')) return;
+  try {
+    const r = await fetch('/api/download-token', {method:'POST'});
+    if (!r.ok) { alert('重置失败'); return; }
+    await loadDirectDownloadUrl();
+  } catch(e) { alert('重置失败: ' + e.message); }
 }
 
 // ==================== 用户管理弹窗 ====================
