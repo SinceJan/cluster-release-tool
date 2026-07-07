@@ -466,6 +466,10 @@ def _classify_file(rel_path, name, source_map=None, template_map=None, inject_ma
                 "hmi-launcher.service": "HMI 进程 systemd 服务单元",
             }
             return ("config", _tmpl("模板自带"), svc_info.get(name, "systemd 服务配置"))
+        if name == "dlt.conf":
+            return ("config", _tmpl("模板自带"), "DLT 守护进程配置文件")
+        if name == "dlt_logstorage.conf":
+            return ("config", _tmpl("模板自带"), "DLT 日志存储过滤配置")
         if name == "feature_config.json":
             return ("config", _tmpl("模板自带"), "车辆功能配置（语言/区域/车型/功能开关）")
         if name.endswith(".json"):
@@ -476,10 +480,6 @@ def _classify_file(rel_path, name, source_map=None, template_map=None, inject_ma
 
     # logOutput/ 下
     if parts[0] == "logOutput":
-        if name == "dlt.conf":
-            return ("config", _tmpl("模板自带"), "DLT 守护进程配置文件")
-        if name == "dlt_logstorage.conf":
-            return ("config", _tmpl("模板自带"), "DLT 日志存储过滤配置")
         return ("config", _tmpl("模板自带"), "logOutput/ 配置文件")
 
     # 根目录脚本

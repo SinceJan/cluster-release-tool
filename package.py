@@ -346,7 +346,7 @@ def main():
     zip_name = f"cluster_{cfg_num}_{commit}_{dirty}_{ts}"
 
     pkg_base = Path.home() / ".cache" / f"cluster_pkg_{os.getpid()}"
-    pkg_dir = pkg_base / f"cluster_{cfg_num}"
+    pkg_dir = pkg_base / "cluster_bolin"
     zip_path = archive_dir / f"{zip_name}.zip"
     source_map_path = pkg_dir / ".source_map.tsv"
 
