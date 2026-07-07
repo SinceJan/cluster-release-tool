@@ -438,18 +438,19 @@ def _classify_file(rel_path, name, source_map=None, template_map=None, inject_ma
         # 模板自带（如 libcocos.so，不从 copy_so_from 拷贝）
         if base == "cocos":
             return ("lib", _tmpl("模板自带"), desc)
-        return ("lib", "thirdparty", desc)
+        return ("lib", _tmpl("thirdparty"), desc)
 
     # bin/ 下的文件
     if parts[0] == "bin":
         bin_info = {
             "cluster":      ("CMake 编译产物",   "Cluster 中间件主程序"),
-            "dlt-daemon":   ("DLT 预编译程序",   "DLT 日志守护进程（COVESA dlt-daemon）"),
+            "dlt-daemon":   ("thirdparty 预编译", "DLT 日志守护进程（COVESA dlt-daemon）"),
             "hmi-launcher": ("HMI 预编译程序",   "HMI 渲染进程（Cocos 引擎）"),
             "data.zip":     ("HMI 资源",        "HMI 资源包（Cocos 图片/UI 资源）"),
         }
         if name in bin_info:
-            src, desc = bin_info[name]
+            src_ref, desc = bin_info[name]
+            src = _tmpl(src_ref)
             return ("hmi" if name in ("hmi-launcher", "data.zip") else "bin", src, desc)
         if name.endswith(".json"):
             return ("config", _tmpl("模板自带"), "应用配置文件")
@@ -506,7 +507,7 @@ def _classify_file(rel_path, name, source_map=None, template_map=None, inject_ma
     if name.endswith(".md") or name.endswith(".txt"):
         return ("doc", _tmpl("模板自带"), "说明文档")
 
-    return ("other", "未知", "其他文件")
+    return ("other", _tmpl("未知"), "其他文件")
 
 
 def cmd_release(args):

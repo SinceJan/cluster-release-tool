@@ -140,6 +140,11 @@ def assemble_pkg_dir(pkg_dir, template_dir, config, cfg_num, repo_root):
 
     inject_map_path = pkg_dir / ".inject_map.tsv"
     with open(inject_map_path, "w", encoding="utf-8") as f:
+        for binary in config.get("binary", []):
+            dst_path = pkg_dir / binary["dst"]
+            if dst_path.exists():
+                src_label = binary["src"].replace("{cfg}", cfg_num)
+                f.write(f"{binary['dst']}\t源码: {src_label}\n")
         for inj in config.get("inject", []):
             src = repo_root / inj["src"]
             dst = pkg_dir / inj["dst"]
