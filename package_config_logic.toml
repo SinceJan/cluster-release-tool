@@ -1,0 +1,72 @@
+# package_config_logic.toml — 业务工程 cluster_logic 部署包组装配置
+#
+# package.py 读取此文件决定从哪里拷什么文件。
+# 改文件名/加文件/删文件 → 改这里，不改代码。
+#
+# 占位符: {cfg} = 8675 或 8676（按 --config 自动替换）
+
+# ==================== 编译产物注入 ====================
+# 从代码工程拷贝到部署包（这些不在模板里，需要从外部注入）
+
+[[binary]]
+src = "output/target/usr/bin/cluster"
+dst = "bin/cluster"
+chmod = 755
+
+[[binary]]
+src = "framework/thirdparty/dltlog/bin/{cfg}/dlt-daemon"
+dst = "bin/dlt-daemon"
+chmod = 755
+optional = true
+
+# ==================== .so 源目录 ====================
+# 从这些目录拷 .so 到部署包 lib/
+# configs 省略 = 所有配置都拷
+
+[[so_source]]
+dir = "framework/thirdparty/protobuf/lib/{cfg}"
+label = "protobuf"
+
+[[so_source]]
+dir = "framework/thirdparty/dltlog/lib/{cfg}"
+label = "dltlog"
+
+[[so_source]]
+dir = "framework/lib/{cfg}"
+label = "framework SDK"
+
+[[so_source]]
+dir = "framework/thirdparty/dds/lib"
+label = "DDS"
+configs = ["high"]
+
+# ==================== 清理规则 ====================
+[cleanup]
+# 模板自带的 .so（清理旧库时保留不删）
+preserve = ["libcocos.so*"]
+
+[exclude_libs]
+low = ["libz.so*"]
+
+# ==================== 源码注入 ====================
+# 模板只是"文件清单"——声明部署包需要哪些文件。
+# 实际打包时优先从源码目录取这些文件（最新版本），源码没有才用模板兜底。
+
+[[inject]]
+src = "run_aarch64.sh"
+dst = "run_aarch64.sh"
+chmod = "755"
+
+[[inject]]
+src = "run_x86_64.sh"
+dst = "run_x86_64.sh"
+chmod = "755"
+
+[[inject]]
+src = "stop_aarch64.sh"
+dst = "stop_aarch64.sh"
+chmod = "755"
+
+[[inject]]
+src = "feature_config.json"
+dst = "etc/feature_config.json"

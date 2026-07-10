@@ -251,6 +251,11 @@
   <p class="subtitle">一键交叉编译 + 打全量部署包（依赖库 + HMI 资源 + BUILD_MANIFEST）</p>
   <div class="release-controls">
     <div class="config-select">
+      <label style="font-size:12px;color:var(--text-muted);margin-right:2px">工程</label>
+      <button class="config-btn active" id="proj-framework" onclick="selectProject('framework')">架构</button>
+      <button class="config-btn" id="proj-logic" onclick="selectProject('logic')">业务</button>
+    </div>
+    <div class="config-select">
       <label style="font-size:12px;color:var(--text-muted);margin-right:2px">分支</label>
       <select id="branch-select" onchange="doCheckout()" style="padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);font-family:inherit;cursor:pointer;max-width:180px">
         <option>加载中...</option>
@@ -378,7 +383,7 @@ function showMainApp() {
   document.getElementById('admin-btn').style.display = showAdmin;
   document.getElementById('restart-btn').style.display = showAdmin;
   document.getElementById('admin-modal').style.display = 'none';
-  loadBranches(); loadDeps(); loadHistory();
+  loadProjects(); loadBranches(); loadDeps(); loadHistory();
   loadDirectDownloadUrl();
   startBusyPoll();
 }
@@ -508,6 +513,7 @@ async function doDeleteUser(username) {
 
 // ==================== 配置 ====================
 let currentConfig = 'low';
+let currentProject = 'framework';
 let pollTimer = null;
 let busyTimer = null;
 let currentTaskId = null;
@@ -516,6 +522,13 @@ function selectConfig(cfg) {
   currentConfig = cfg;
   document.getElementById('cfg-low').classList.toggle('active',cfg==='low');
   document.getElementById('cfg-high').classList.toggle('active',cfg==='high');
+}
+
+function selectProject(proj) {
+  currentProject = proj;
+  document.getElementById('proj-framework').classList.toggle('active',proj==='framework');
+  document.getElementById('proj-logic').classList.toggle('active',proj==='logic');
+  loadBranches();
 }
 
 // ==================== 打包状态轮询（多用户实时同步） ====================
@@ -542,12 +555,31 @@ async function pollPackagingStatus() {
       btn.disabled = true;
       currentTaskId = d.task_id || null;
       if (cancelBtn) cancelBtn.style.display = '';
-      statusEl.innerHTML = `<span class="status-tag status-running">${d.builder||'其他用户'} 正在打包 (${d.config})...</span>`;
+      const projLabel = d.project==='logic'?'logic':'framework';
+      statusEl.innerHTML = `<span class="status-tag status-running">${d.builder||'其他用户'} 正在打包 [${projLabel}·${d.config}]...</span>`;
     } else {
       btn.disabled = false;
       currentTaskId = null;
       if (cancelBtn) cancelBtn.style.display = 'none';
       if (statusEl.textContent.includes('正在打包')) statusEl.innerHTML = '';
+    }
+  } catch(e) {}
+}
+
+// ==================== 工程选择 ====================
+
+async function loadProjects() {
+  try {
+    const r = await fetch('/api/projects');
+    const d = await r.json();
+    const logicBtn = document.getElementById('proj-logic');
+    if (!d.logic || !isAdmin) {
+      logicBtn.style.display = 'none';
+      if (currentProject === 'logic') {
+        selectProject('framework');
+      }
+    } else {
+      logicBtn.style.display = '';
     }
   } catch(e) {}
 }
@@ -558,7 +590,7 @@ let currentBranch = '';
 async function loadBranches() {
   const sel = document.getElementById('branch-select');
   try {
-    const r = await fetch('/api/branches');
+    const r = await fetch('/api/branches?project=' + currentProject);
     if (!r.ok) { sel.innerHTML = '<option>获取失败</option>'; return; }
     const d = await r.json();
     currentBranch = d.current;
@@ -580,7 +612,7 @@ async function doCheckout() {
   try {
     const r = await fetch('/api/checkout', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({branch})
+      body: JSON.stringify({branch, project: currentProject})
     });
     const d = await r.json();
     if (!r.ok) {
@@ -589,7 +621,7 @@ async function doCheckout() {
     }
     currentBranch = branch;
     statusEl.innerHTML = `<span class="status-tag status-success">已切换到 ${branch}</span>`;
-    loadBranches(); loadDeps(); loadHistory();
+    loadProjects(); loadBranches(); loadDeps(); loadHistory();
   } catch(e) {
     statusEl.innerHTML = `<span class="status-tag status-failed">网络错误</span>`;
     loadBranches();
@@ -623,7 +655,7 @@ async function startRelease(){
   const btn=document.getElementById('release-btn'),cancelBtn=document.getElementById('cancel-btn'),logEl=document.getElementById('release-log'),statusEl=document.getElementById('release-status');
   btn.disabled=true;cancelBtn.style.display='none';logEl.textContent='';statusEl.innerHTML='<span class="status-tag status-running">打包中...</span>';
   try{
-    const r=await fetch('/api/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:currentConfig})});
+    const r=await fetch('/api/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({config:currentConfig,project:currentProject})});
     const d=await r.json().catch(()=>({}));
     if(r.status===409){statusEl.innerHTML=`<span class="status-tag status-failed">${d.message||'已有打包任务在运行'}</span>`;return;}
     if(!r.ok)throw new Error(d.error||await r.text());

@@ -324,12 +324,16 @@ def main():
     parser.add_argument("--repo-root", required=True, help="cluster_framework 工程根目录")
     parser.add_argument("--template-dir",
                         help="打包模板目录（默认 PACKAGING_TEMPLATE_DIR 环境变量）")
+    parser.add_argument("--package-config", default="package_config.toml",
+                        help="包配置文件名（默认 package_config.toml）")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
     cfg_num = "8675" if args.config == "low" else "8676"
 
-    config_path = Path(__file__).parent / "package_config.toml"
+    config_path = args.package_config
+    if not os.path.isabs(config_path):
+        config_path = Path(__file__).parent / config_path
     config = load_config(config_path)
 
     template_base = args.template_dir or os.environ.get("PACKAGING_TEMPLATE_DIR") or str(repo_root / "prompt/部署/新项目")

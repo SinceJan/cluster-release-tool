@@ -18,6 +18,8 @@ TOOL_DIR="${SCRIPT_DIR}"
 
 # 代码工程根目录（通过参数或环境变量指定）
 REPO_ROOT="${1:-${REPO_ROOT:-/home/heyi/code/cluster_framework}}"
+REPO_ROOT_LOGIC="${REPO_ROOT_LOGIC:-$(dirname "${REPO_ROOT}")/cluster_logic}"
+TEMPLATE_DIR="${TEMPLATE_DIR:-$(dirname "${REPO_ROOT}")/部署/新项目}"
 
 # Python 路径
 PYTHON_BIN="${PYTHON:-python3}"
@@ -44,6 +46,8 @@ else
     VENV_PY="${VENV_DIR}/Scripts/python.exe"
 fi
 
-echo "代码工程: ${REPO_ROOT}"
+echo "代码工程(framework): ${REPO_ROOT}"
+echo "代码工程(logic):     ${REPO_ROOT_LOGIC}"
+echo "部署模板:            ${TEMPLATE_DIR}"
 echo "发版工具启动: http://${HOST}:${PORT}"
-exec "${VENV_PY}" "${TOOL_DIR}/app.py" --repo-root "${REPO_ROOT}" --host "${HOST}" --port "${PORT}"
+exec "${VENV_PY}" "${TOOL_DIR}/app.py" --repo-root "${REPO_ROOT}" --repo-root-logic "${REPO_ROOT_LOGIC}" --template-dir "${TEMPLATE_DIR}" --host "${HOST}" --port "${PORT}"

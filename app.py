@@ -38,6 +38,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 
 _REPO_ROOT = None
+_REPO_ROOT_LOGIC = None
+_TEMPLATE_DIR = None
 _BJT = timezone(timedelta(hours=8))
 
 app = Flask(__name__)
@@ -75,6 +77,16 @@ def get_repo_root():
     return _REPO_ROOT
 
 
+def get_repo_root_logic():
+    return _REPO_ROOT_LOGIC
+
+
+def get_repo_root_for_project(project):
+    if project == "logic" and _REPO_ROOT_LOGIC:
+        return _REPO_ROOT_LOGIC
+    return _REPO_ROOT
+
+
 def get_output_dir():
     return _REPO_ROOT / "output"
 
@@ -87,18 +99,26 @@ def _prune_tasks():
         del _tasks[k]
 
 
+def _archive_dirs():
+    """返回所有需要搜索的 archive 目录列表。"""
+    dirs = [get_output_dir() / "archive"]
+    if _REPO_ROOT_LOGIC:
+        dirs.append(_REPO_ROOT_LOGIC / "output" / "archive")
+    return dirs
+
+
 def _prune_archive():
-    archive_dir = get_output_dir() / "archive"
-    if not archive_dir.exists():
-        return
-    zips = sorted(archive_dir.glob("cluster_*.zip"),
-                  key=lambda p: p.stat().st_mtime, reverse=True)
-    for old_zip in zips[_MAX_ARCHIVE_PACKAGES:]:
-        old_zip.unlink()
-        for ext in (".manifest.toml", ".builder"):
-            f = old_zip.with_suffix(ext)
-            if f.exists():
-                f.unlink()
+    for archive_dir in _archive_dirs():
+        if not archive_dir.exists():
+            continue
+        zips = sorted(archive_dir.glob("cluster_*.zip"),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+        for old_zip in zips[_MAX_ARCHIVE_PACKAGES:]:
+            old_zip.unlink()
+            for ext in (".manifest.toml", ".builder"):
+                f = old_zip.with_suffix(ext)
+                if f.exists():
+                    f.unlink()
 
 
 # ==================== 用户管理 ====================
@@ -316,10 +336,19 @@ def api_users_delete(username):
 
 # ==================== 分支路由 ====================
 
+@app.route("/api/projects")
+@login_required
+def api_projects():
+    return jsonify({
+        "framework": True,
+        "logic": bool(_REPO_ROOT_LOGIC),
+    })
+
 @app.route("/api/branches")
 @login_required
 def api_branches():
-    repo_root = get_repo_root()
+    project = request.args.get("project", "framework")
+    repo_root = get_repo_root_for_project(project)
     current = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=str(repo_root), capture_output=True, text=True
@@ -341,9 +370,10 @@ def api_branches():
 def api_checkout():
     data = request.get_json(silent=True) or {}
     branch = data.get("branch", "").strip()
+    project = data.get("project", "framework")
     if not branch:
         return jsonify({"error": "分支名不能为空"}), 400
-    repo_root = get_repo_root()
+    repo_root = get_repo_root_for_project(project)
     fetch = subprocess.run(["git", "fetch", "origin"],
                            cwd=str(repo_root), capture_output=True, text=True)
     if fetch.returncode != 0:
@@ -364,8 +394,15 @@ def api_checkout():
 def api_release():
     data = request.get_json(silent=True) or {}
     config = data.get("config", "low")
+    project = data.get("project", "framework")
     if config not in ("low", "high"):
         return jsonify({"error": "config 必须是 low 或 high"}), 400
+    if project not in ("framework", "logic"):
+        return jsonify({"error": "project 必须是 framework 或 logic"}), 400
+    if project == "logic" and not _REPO_ROOT_LOGIC:
+        return jsonify({"error": "cluster_logic 工程目录未配置，请联系管理员"}), 400
+    if project == "logic" and not session.get("is_admin"):
+        return jsonify({"error": "业务工程打包仅限管理员"}), 403
 
     running = next((t for t in _tasks.values() if t["status"] == "running"), None)
     if running:
@@ -384,6 +421,7 @@ def api_release():
     _tasks[task_id] = {
         "id": task_id,
         "config": config,
+        "project": project,
         "status": "running",
         "builder": builder,
         "started_at": datetime.now(tz=_BJT).strftime("%Y-%m-%d %H:%M:%S"),
@@ -396,7 +434,7 @@ def api_release():
 
     thread = threading.Thread(
         target=_run_release,
-        args=(task_id, config, builder),
+        args=(task_id, config, builder, project),
         daemon=True,
     )
     try:
@@ -442,11 +480,12 @@ def _read_proc_output_with_cancel(proc, task):
     return False
 
 
-def _run_release(task_id, config, builder="unknown"):
+def _run_release(task_id, config, builder="unknown", project="framework"):
     """后台线程：git pull → build.sh → package.py。锁在 finally 释放。"""
     global _current_proc
     task = _tasks[task_id]
-    repo_root = get_repo_root()
+    repo_root = get_repo_root_for_project(project)
+    is_logic = (project == "logic")
 
     try:
         # Step 1: git pull
@@ -502,6 +541,10 @@ def _run_release(task_id, config, builder="unknown"):
         package_script = Path(__file__).parent / "package.py"
         cmd = [sys.executable, str(package_script),
                "--config", config, "--repo-root", str(repo_root)]
+        if is_logic:
+            cmd.extend(["--package-config", "package_config_logic.toml"])
+        if _TEMPLATE_DIR:
+            cmd.extend(["--template-dir", str(_TEMPLATE_DIR)])
         task["log"].append(f"$ {' '.join(cmd)}\n")
         proc = subprocess.Popen(
             cmd, cwd=str(repo_root),
@@ -535,7 +578,7 @@ def _run_release(task_id, config, builder="unknown"):
         if not task.get("_cancel_requested"):
             try:
                 cfg_num = "8675" if config == "low" else "8676"
-                archive_dir = get_output_dir() / "archive"
+                archive_dir = repo_root / "output" / "archive"
                 zips = sorted(archive_dir.glob(f"cluster_{cfg_num}_*.zip"),
                               key=lambda p: p.stat().st_mtime, reverse=True)
                 if zips:
@@ -557,6 +600,7 @@ def api_release_status(task_id):
     return jsonify({
         "id": task["id"],
         "config": task["config"],
+        "project": task.get("project", "framework"),
         "status": task["status"],
         "started_at": task["started_at"],
         "finished_at": task["finished_at"],
@@ -575,6 +619,7 @@ def api_packaging_status():
             "busy": True,
             "builder": running.get("builder", ""),
             "config": running["config"],
+            "project": running.get("project", "framework"),
             "started_at": running["started_at"],
             "task_id": running["id"],
         })
@@ -631,7 +676,8 @@ def _cleanup_packaging_tmp():
 @app.route("/api/pull")
 @login_required
 def api_pull():
-    repo_root = get_repo_root()
+    project = request.args.get("project", "framework")
+    repo_root = get_repo_root_for_project(project)
     log = []
     ok, commit = _git_pull(repo_root, log)
     return jsonify({"ok": ok, "commit": commit, "log": "".join(log)})
@@ -705,11 +751,11 @@ def _parse_manifest(manifest_path):
 @app.route("/api/history")
 @login_required
 def api_history():
-    archive_dir = get_output_dir() / "archive"
-    if not archive_dir.exists():
-        return jsonify({"history": []})
-    zips = sorted(archive_dir.glob("cluster_*.zip"),
-                  key=lambda p: p.stat().st_mtime, reverse=True)
+    zips = []
+    for ad in _archive_dirs():
+        if ad.exists():
+            zips.extend(ad.glob("cluster_*.zip"))
+    zips = sorted(zips, key=lambda p: p.stat().st_mtime, reverse=True)
     history = []
     for z in zips:
         manifest = z.with_suffix(".manifest.toml")
@@ -741,13 +787,16 @@ def api_history():
 
 def _safe_archive_path(name):
     """安全拼接 archive 路径，防止路径穿越。返回 Path 或 None。"""
-    archive_dir = (get_output_dir() / "archive").resolve()
-    f = (archive_dir / name).resolve()
-    try:
-        f.relative_to(archive_dir)
-    except ValueError:
-        return None
-    return f
+    for archive_dir in _archive_dirs():
+        archive_dir = archive_dir.resolve()
+        f = (archive_dir / name).resolve()
+        try:
+            f.relative_to(archive_dir)
+        except ValueError:
+            continue
+        if f.exists():
+            return f
+    return None
 
 
 @app.route("/api/download/<path:name>")
@@ -789,12 +838,16 @@ def download_latest():
     if not token or token != expected:
         return jsonify({"error": "token 无效或缺失"}), 401
 
-    archive_dir = get_output_dir() / "archive"
-    if not archive_dir.exists():
-        return jsonify({"error": "暂无可用包"}), 404
+    def _all_zips():
+        zips = []
+        for ad in _archive_dirs():
+            if ad.exists():
+                zips.extend(ad.glob("cluster_*.zip"))
+        return sorted(zips, key=lambda p: p.stat().st_mtime, reverse=True)
 
-    zips = sorted(archive_dir.glob("cluster_*.zip"),
-                  key=lambda p: p.stat().st_mtime, reverse=True)
+    zips = _all_zips()
+    if not zips:
+        return jsonify({"error": "暂无可用包"}), 404
 
     config_filter = request.args.get("config", "").strip()
     if config_filter:
@@ -999,19 +1052,39 @@ def index():
 # ==================== main ====================
 
 def main():
-    global _REPO_ROOT
+    global _REPO_ROOT, _REPO_ROOT_LOGIC, _TEMPLATE_DIR
     parser = argparse.ArgumentParser(description="cluster 发版工具")
     parser.add_argument("--repo-root", default="/home/heyi/code/cluster_framework",
                         help="cluster_framework 工程根目录")
+    parser.add_argument("--repo-root-logic", default="",
+                        help="cluster_logic 工程根目录（默认 ../cluster_logic）")
+    parser.add_argument("--template-dir", default="",
+                        help="公用部署模板目录（默认 ../部署/新项目）")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
 
     _REPO_ROOT = Path(args.repo_root).resolve()
+    if args.repo_root_logic:
+        _REPO_ROOT_LOGIC = Path(args.repo_root_logic).resolve()
+    else:
+        _REPO_ROOT_LOGIC = _REPO_ROOT.parent / "cluster_logic"
+    if not _REPO_ROOT_LOGIC.is_dir():
+        _REPO_ROOT_LOGIC = None
+
+    if args.template_dir:
+        _TEMPLATE_DIR = Path(args.template_dir).resolve()
+    else:
+        _TEMPLATE_DIR = _REPO_ROOT.parent / "部署" / "新项目"
+    if not _TEMPLATE_DIR.is_dir():
+        _TEMPLATE_DIR = None
+
     _ensure_default_admin()
 
-    print(f"repo_root = {_REPO_ROOT}")
-    print(f"listen = {args.host}:{args.port}")
+    print(f"repo_root         = {_REPO_ROOT}")
+    print(f"repo_root_logic   = {_REPO_ROOT_LOGIC}")
+    print(f"template_dir      = {_TEMPLATE_DIR}")
+    print(f"listen            = {args.host}:{args.port}")
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
 
 

@@ -430,6 +430,7 @@ def _classify_file(rel_path, name, source_map=None, template_map=None, inject_ma
             "ddscxx":               "Cyclone DDS C++ 接口",
             "soacm_log_imp":        "DDS 日志实现",
             "z":                    "zlib 压缩库（仅高配）",
+            "bolin_basic":          "Bolin Basic 框架基础库（架构工程产出 libbolin_basic.so）",
         }
         desc = desc_info.get(base, f"依赖库 ({base})")
         # 优先用 build.sh 记录的真实源目录（含 8675/8676 区分）
